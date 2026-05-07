@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { CheckCircle, XCircle, Send, Search } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
+import { listDrafts, approveDraft, rejectDraft } from '../../services/draftService'
 import styles from './Drafts.module.css'
 
 const STATUS_LABELS = { pending:'Pendiente', approved:'Aprobado', published:'Publicado', rejected:'Rechazado' }
@@ -9,20 +10,35 @@ const STATUSES = ['Todos','pending','approved','published','rejected']
 const CHANNEL_LABELS = { linkedin:'LinkedIn', twitter:'Twitter', newsletter:'Newsletter' }
 const STATUS_DISPLAY = { pending:'Pendiente', approved:'Aprobado', published:'Publicado', rejected:'Rechazado' }
 
-function DraftCard({ draft }) {
+function DraftCard({ draft, onStatusChange }) {
   const { openModal, updateDraftStatus, showToast } = useAppStore()
   const pct = Math.round(draft.score * 10)
 
-  const approve = (e) => {
+  const approve = async (e) => {
     e.stopPropagation()
+    try {
+      await approveDraft(draft.id)
+    } catch {
+      // Backend no disponible → actualizar localmente
+    }
     updateDraftStatus(draft.id, 'approved')
     showToast('✅','Borrador aprobado','Listo para publicación')
+    onStatusChange?.()
   }
-  const reject = (e) => {
+
+  const reject = async (e) => {
     e.stopPropagation()
-    updateDraftStatus(draft.id, 'rejected', { rejectionReason: 'Rechazado desde el panel' })
+    const reason = 'Rechazado desde el panel'
+    try {
+      await rejectDraft(draft.id, reason)
+    } catch {
+      // Backend no disponible → actualizar localmente
+    }
+    updateDraftStatus(draft.id, 'rejected', { rejectionReason: reason })
     showToast('✗','Borrador rechazado','Registrado en el sistema')
+    onStatusChange?.()
   }
+
   const publish = (e) => {
     e.stopPropagation()
     updateDraftStatus(draft.id, 'published', { publishedAt: 'ahora' })
@@ -70,10 +86,50 @@ function DraftCard({ draft }) {
 }
 
 export default function Drafts() {
-  const { drafts } = useAppStore()
+  const { drafts: mockDrafts, showToast } = useAppStore()
+  const [drafts, setDrafts] = useState(mockDrafts)
   const [search, setSearch] = useState('')
   const [channel, setChannel] = useState('Todos')
   const [status, setStatus]   = useState('Todos')
+  const [loading, setLoading] = useState(false)
+  const [usingBackend, setUsingBackend] = useState(false)
+
+  const fetchDrafts = async () => {
+    setLoading(true)
+    try {
+      const params = {}
+      if (channel !== 'Todos') params.channel = channel
+      if (status !== 'Todos') params.status = status
+      const data = await listDrafts(params)
+      // Normalizar respuesta del backend al formato del store
+      const normalized = data.map((d) => ({
+        id: d.id,
+        channel: d.channel?.toLowerCase() ?? 'newsletter',
+        channelLabel: d.channelLabel ?? d.channel,
+        icon: d.icon ?? '📄',
+        title: d.title,
+        preview: d.preview ?? d.content?.slice(0, 120) ?? '',
+        content: d.content ?? '',
+        status: d.status?.toLowerCase() ?? 'pending',
+        score: d.aiScore ?? d.score ?? 0,
+        createdAt: d.createdAt ?? '',
+        week: d.weekLabel ?? '',
+        sources: d.sources ?? [],
+        publishedAt: d.publishedAt ?? null,
+        rejectionReason: d.rejectionReason ?? null,
+      }))
+      setDrafts(normalized)
+      setUsingBackend(true)
+    } catch {
+      // Backend no disponible → usar datos mock del store
+      setDrafts(mockDrafts)
+      setUsingBackend(false)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { fetchDrafts() }, [channel, status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = drafts.filter((d) => {
     const matchChan   = channel === 'Todos' || d.channel === channel
@@ -85,6 +141,11 @@ export default function Drafts() {
 
   return (
     <div className={styles.page}>
+      {!usingBackend && (
+        <div style={{ padding: '8px 16px', background: 'rgba(245,166,35,.12)', borderRadius: 8, marginBottom: 12, fontSize: 12, color: 'var(--amber)' }}>
+          ⚠ Modo demo — backend no disponible. Mostrando datos locales.
+        </div>
+      )}
       <div className={styles.filtersBar}>
         <div className={styles.searchWrap}>
           <Search size={14} className={styles.searchIcon} />
@@ -104,11 +165,13 @@ export default function Drafts() {
         ))}
       </div>
 
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="empty-state"><span className="icon">⏳</span><p>Cargando borradores…</p></div>
+      ) : filtered.length === 0 ? (
         <div className="empty-state"><span className="icon">🔍</span><p>No hay borradores que coincidan con los filtros</p></div>
       ) : (
         <div className={styles.grid}>
-          {filtered.map((d) => <DraftCard key={d.id} draft={d} />)}
+          {filtered.map((d) => <DraftCard key={d.id} draft={d} onStatusChange={fetchDrafts} />)}
         </div>
       )}
     </div>

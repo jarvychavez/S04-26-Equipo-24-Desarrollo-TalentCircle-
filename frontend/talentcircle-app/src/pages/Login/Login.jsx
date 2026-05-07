@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../../store/useAppStore'
+import { login as loginApi } from '../../services/authService'
 import styles from './Login.module.css'
 
 export default function Login() {
@@ -10,15 +11,36 @@ export default function Login() {
   const { login, showToast } = useAppStore()
   const navigate = useNavigate()
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     if (!email || !password) { showToast('⚠️','Campos requeridos','Ingresa tu email y contraseña'); return }
     setLoading(true)
-    setTimeout(() => {
-      login({ name: 'Faner Santander', initials: 'FS', role: 'ADMIN', email })
-      showToast('✅','Bienvenido(a), Faner','Tienes 4 borradores pendientes de revisión')
+    try {
+      // Intenta autenticar contra el backend real
+      const data = await loginApi(email, password)
+      localStorage.setItem('accessToken', data.accessToken)
+      localStorage.setItem('refreshToken', data.refreshToken)
+      const { fullName, role } = data.user
+      const initials = fullName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
+      login({ name: fullName, initials, role, email: data.user.email })
+      showToast('✅', `Bienvenido(a), ${fullName.split(' ')[0]}`, 'Sesión iniciada correctamente')
       navigate('/dashboard')
-    }, 900)
+    } catch (err) {
+      // Fallback demo: si el backend no está disponible, permite acceso con credenciales demo
+      if (!err.response) {
+        // Backend no disponible → modo demo
+        login({ name: 'Faner Santander', initials: 'FS', role: 'ADMIN', email })
+        showToast('✅', 'Bienvenido(a) (modo demo)', 'Backend no disponible — usando datos locales')
+        navigate('/dashboard')
+      } else {
+        const msg = err.response?.status === 401
+          ? 'Credenciales incorrectas'
+          : 'Error al iniciar sesión. Intenta de nuevo.'
+        showToast('⚠️', 'Error de autenticación', msg)
+      }
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (

@@ -1,4 +1,6 @@
+import { useState, useEffect } from 'react'
 import { useAppStore } from '../../store/useAppStore'
+import { getExecutions } from '../../services/adminService'
 import styles from './Executions.module.css'
 
 const STATUS_META = {
@@ -8,11 +10,44 @@ const STATUS_META = {
 }
 
 export default function Executions() {
-  const executions = useAppStore((s) => s.executions)
-  const showToast  = useAppStore((s) => s.showToast)
+  const mockExecutions = useAppStore((s) => s.executions)
+  const showToast      = useAppStore((s) => s.showToast)
+  const [executions, setExecutions] = useState(mockExecutions)
+  const [usingBackend, setUsingBackend] = useState(false)
+
+  useEffect(() => {
+    const fetchExecutions = async () => {
+      try {
+        const data = await getExecutions()
+        // Normalizar respuesta del backend
+        const normalized = data.map((ex) => ({
+          id: ex.id,
+          week: ex.weekLabel ?? ex.week ?? '',
+          status: ex.status?.toLowerCase() ?? 'completed',
+          activities: ex.activitiesCount ?? ex.activities ?? 0,
+          drafts: ex.draftsCount ?? ex.drafts ?? 0,
+          duration: ex.durationFormatted ?? ex.duration ?? '—',
+          triggeredBy: ex.triggeredBy ?? 'Scheduler',
+          progress: ex.progressPercent ?? ex.progress ?? 100,
+        }))
+        setExecutions(normalized)
+        setUsingBackend(true)
+      } catch {
+        // Backend no disponible → usar datos mock
+        setExecutions(mockExecutions)
+        setUsingBackend(false)
+      }
+    }
+    fetchExecutions()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className={styles.page}>
+      {!usingBackend && (
+        <div style={{ padding: '8px 16px', background: 'rgba(245,166,35,.12)', borderRadius: 8, marginBottom: 12, fontSize: 12, color: 'var(--amber)' }}>
+          ⚠ Modo demo — backend no disponible. Mostrando datos locales.
+        </div>
+      )}
       <div className={styles.tableWrap}>
         <table className={styles.table}>
           <thead>
@@ -24,7 +59,7 @@ export default function Executions() {
           </thead>
           <tbody>
             {executions.map((ex) => {
-              const sm = STATUS_META[ex.status]
+              const sm = STATUS_META[ex.status] ?? STATUS_META.completed
               return (
                 <tr key={ex.id} className={styles.row} onClick={() => showToast('🔍', `Ejecución ${ex.id}`, `Semana: ${ex.week} · ${ex.activities} actividades procesadas`)}>
                   <td className={styles.tdId}>#{ex.id}</td>

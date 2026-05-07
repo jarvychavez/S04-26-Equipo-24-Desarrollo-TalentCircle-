@@ -1,12 +1,20 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Save, Plus, ToggleLeft, ToggleRight } from 'lucide-react'
 import { useAppStore } from '../../store/useAppStore'
+import { getSources, updateSource, getConfig, updateConfig, getAdminUsers } from '../../services/adminService'
 import styles from './Admin.module.css'
 
-const SOURCES = [
+const MOCK_SOURCES = [
   { id:'s1', icon:'💬', name:'Discord – TalentCircle Dev',    url:'discord.gg/talentcircle',    type:'discord', active:true  },
   { id:'s2', icon:'◎', name:'Circle.so – Comunidad Principal', url:'talentcircle.circle.so',    type:'circle',  active:true  },
   { id:'s3', icon:'⬡', name:'Slack – Canal #recursos',         url:'workspace.slack.com',        type:'slack',   active:false },
+]
+
+const MOCK_USERS = [
+  { initials:'JC', name:'Javier Chavez',     email:'javier@talentcircle.com', role:'EDITOR', active:true,  last:'hace 2h' },
+  { initials:'EP', name:'Eduin Pino', email:'eduin@talentcircle.com', role:'ADMIN',  active:true,  last:'hace 1d' },
+  { initials:'FS', name:'Faner Santander', email:'faner@talentcircle.com', role:'ADMIN',  active:true,  last:'hace 1h' },
+  { initials:'LA', name:'Luis Armuto',    email:'luis@talentcircle.com',   role:'EDITOR', active:false, last:'hace 5d' },
 ]
 
 const PROMPT_TABS = ['newsletter','linkedin','twitter']
@@ -49,13 +57,6 @@ Tono: directo, ágil y conversacional.
 Actividad semanal: {ACTIVIDADES}`,
 }
 
-const USERS = [
-  { initials:'JC', name:'Javier Chavez',     email:'javier@talentcircle.com', role:'EDITOR', active:true,  last:'hace 2h' },
-  { initials:'EP', name:'Eduin Pino', email:'eduin@talentcircle.com', role:'ADMIN',  active:true,  last:'hace 1d' },
-  { initials:'FS', name:'Faner Santander', email:'faner@talentcircle.com', role:'ADMIN',  active:true,  last:'hace 1h' },
-  { initials:'LA', name:'Luis Armuto',    email:'luis@talentcircle.com',   role:'EDITOR', active:false, last:'hace 5d' },
-]
-
 function Toggle({ active, onChange }) {
   return (
     <button className={`${styles.toggle} ${active?styles.toggleOn:styles.toggleOff}`} onClick={onChange}>
@@ -66,17 +67,76 @@ function Toggle({ active, onChange }) {
 
 export default function Admin() {
   const showToast = useAppStore((s) => s.showToast)
-  const [sources, setSources] = useState(SOURCES)
+  const [sources, setSources] = useState(MOCK_SOURCES)
+  const [users, setUsers] = useState(MOCK_USERS)
   const [promptTab, setPromptTab] = useState('newsletter')
   const [prompts, setPrompts] = useState(PROMPT_CONTENT)
   const [llm, setLlm] = useState('Anthropic Claude Sonnet')
   const [maxItems, setMaxItems] = useState(20)
   const [cron, setCron] = useState('0 18 * * FRI')
+  const [usingBackend, setUsingBackend] = useState(false)
 
-  const toggleSource = (id) => setSources(ss => ss.map(s => s.id===id ? {...s,active:!s.active} : s))
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [sourcesData, configData, usersData] = await Promise.all([
+          getSources(),
+          getConfig(),
+          getAdminUsers(),
+        ])
+        setSources(sourcesData)
+        if (configData) {
+          if (configData.llmProvider) setLlm(configData.llmProvider)
+          if (configData.maxActivitiesPerExecution) setMaxItems(configData.maxActivitiesPerExecution)
+          if (configData.cronExpression) setCron(configData.cronExpression)
+        }
+        if (usersData?.length) {
+          setUsers(usersData.map((u) => ({
+            initials: u.fullName?.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() ?? '??',
+            name: u.fullName ?? u.email,
+            email: u.email,
+            role: u.role,
+            active: u.active,
+            last: u.lastLoginAt ?? '—',
+          })))
+        }
+        setUsingBackend(true)
+      } catch {
+        // Backend no disponible → usar datos mock
+        setUsingBackend(false)
+      }
+    }
+    fetchData()
+  }, [])
+
+  const toggleSource = async (id) => {
+    const source = sources.find((s) => s.id === id)
+    const updated = { ...source, active: !source.active }
+    setSources((ss) => ss.map((s) => s.id === id ? updated : s))
+    try {
+      await updateSource(id, { active: updated.active })
+    } catch {
+      // Revertir si falla
+      setSources((ss) => ss.map((s) => s.id === id ? source : s))
+    }
+  }
+
+  const saveConfig = async () => {
+    try {
+      await updateConfig({ llmProvider: llm, maxActivitiesPerExecution: maxItems, cronExpression: cron })
+      showToast('✅','Configuración guardada','Aplica en la próxima ejecución')
+    } catch {
+      showToast('✅','Configuración guardada (local)','Backend no disponible — cambios locales')
+    }
+  }
 
   return (
     <div className={styles.page}>
+      {!usingBackend && (
+        <div style={{ padding: '8px 16px', background: 'rgba(245,166,35,.12)', borderRadius: 8, marginBottom: 12, fontSize: 12, color: 'var(--amber)' }}>
+          ⚠ Modo demo — backend no disponible. Mostrando datos locales.
+        </div>
+      )}
       <div className={styles.grid}>
 
         {/* Sources */}
@@ -116,8 +176,7 @@ export default function Admin() {
             <label>Cron de ejecución automática</label>
             <input type="text" value={cron} onChange={e=>setCron(e.target.value)} style={{fontFamily:"'DM Mono',monospace"}} />
           </div>
-          <button className="btn btn-green" style={{width:'100%'}}
-            onClick={()=>showToast('✅','Configuración guardada','Aplica en la próxima ejecución')}>
+          <button className="btn btn-green" style={{width:'100%'}} onClick={saveConfig}>
             <Save size={14}/> Guardar cambios
           </button>
         </div>
@@ -155,7 +214,7 @@ export default function Admin() {
               <tr>{['Usuario','Email','Rol','Estado','Último acceso','Acciones'].map(h=><th key={h} className={styles.uth}>{h}</th>)}</tr>
             </thead>
             <tbody>
-              {USERS.map((u) => (
+              {users.map((u) => (
                 <tr key={u.email} className={styles.urow}>
                   <td className={styles.utd}>
                     <div className={styles.userCell}>

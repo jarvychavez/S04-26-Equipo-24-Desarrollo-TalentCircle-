@@ -1,6 +1,7 @@
 import { useLocation } from 'react-router-dom'
 import { Bell, Play, MoreVertical } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import { triggerExecution } from '../services/adminService'
 import styles from './Topbar.module.css'
 
 const META = {
@@ -13,13 +14,22 @@ const META = {
 export default function Topbar() {
   const { pathname } = useLocation()
   const showToast = useAppStore((s) => s.showToast)
+  const currentUser = useAppStore((s) => s.currentUser)
   const { title, sub } = META[pathname] || { title: 'TalentCircle', sub: '' }
 
-  const runPipeline = () => {
+  const runPipeline = async () => {
     showToast('⚙', 'Pipeline iniciado', 'Recolectando actividad de la comunidad…')
-    setTimeout(() => showToast('🤖', 'Analizando con IA', 'Procesando contribuciones…'), 2500)
-    setTimeout(() => showToast('✎', 'Generando borradores', 'Creando contenido por canal…'), 5000)
-    setTimeout(() => showToast('✅', 'Pipeline completado', '6 borradores nuevos listos'), 7500)
+    try {
+      await triggerExecution(currentUser?.name ?? 'Manual')
+      setTimeout(() => showToast('🤖', 'Analizando con IA', 'Procesando contribuciones…'), 2500)
+      setTimeout(() => showToast('✎', 'Generando borradores', 'Creando contenido por canal…'), 5000)
+      setTimeout(() => showToast('✅', 'Pipeline completado', '6 borradores nuevos listos'), 7500)
+    } catch {
+      // Backend no disponible → simulación demo
+      setTimeout(() => showToast('🤖', 'Analizando con IA', 'Procesando contribuciones…'), 2500)
+      setTimeout(() => showToast('✎', 'Generando borradores', 'Creando contenido por canal…'), 5000)
+      setTimeout(() => showToast('✅', 'Pipeline completado (demo)', '6 borradores nuevos listos'), 7500)
+    }
   }
 
   return (
